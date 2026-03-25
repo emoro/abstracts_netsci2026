@@ -390,7 +390,7 @@ function App() {
           backgroundColor="#ffffff"
         />
         <div className="title-bar">
-          <img src="/netsci2026_logo.png" alt="NetSci 2026" />
+          <img src={import.meta.env.BASE_URL + "netsci2026_logo.png"} alt="NetSci 2026" />
           <div className="title-text">
             <h1>Abstract Similarity Network</h1>
             <p>
