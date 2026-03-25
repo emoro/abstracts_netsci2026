@@ -1,0 +1,164 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #ffffff;
+  color: #333333;
+  overflow: hidden;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 1.2rem;
+  color: #999;
+}
+
+.app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+.graph-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.graph-container canvas {
+  cursor: crosshair;
+}
+
+.title-bar {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.title-bar img {
+  height: 56px;
+  pointer-events: none;
+}
+
+.title-text h1 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #333333;
+  line-height: 1.2;
+}
+
+.title-text p {
+  font-size: 0.78rem;
+  color: #888;
+  margin-top: 2px;
+}
+
+.sidebar {
+  width: 300px;
+  min-width: 300px;
+  background: #fafafa;
+  border-left: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.method-toggle {
+  display: flex;
+  padding: 12px 14px;
+  gap: 4px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: transparent;
+  color: #888;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #555;
+}
+
+.toggle-btn.active {
+  background: #C8352E;
+  border-color: #C8352E;
+  color: #fff;
+}
+
+.legend-panel {
+  flex: 1;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+
+.legend-panel h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #999;
+  margin-bottom: 8px;
+}
+
+.legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.78rem;
+}
+
+.legend-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.legend-item.active {
+  background: rgba(200, 53, 46, 0.1);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  border-radius: 50%;
+}
+
+.legend-label {
+  flex: 1;
+  color: #444;
+}
+
+.legend-count {
+  color: #aaa;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
