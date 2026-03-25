@@ -28,7 +28,7 @@ function App() {
   const sessionField = METHODS[method].key;
 
   useEffect(() => {
-    fetch("/graph_data.json")
+    fetch(import.meta.env.BASE_URL + "graph_data.json")
       .then((r) => r.json())
       .then((data) => {
         setRawData(data);
