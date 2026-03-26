@@ -1,0 +1,211 @@
+[
+  {
+    "id": "S03",
+    "label": "S03 \u2014 Social Networks & Information Dynamics III",
+    "talkIds": [
+      "186",
+      "466",
+      "245",
+      "299",
+      "500",
+      "72"
+    ]
+  },
+  {
+    "id": "S05",
+    "label": "S05 \u2014 Social Networks & Information Dynamics V",
+    "talkIds": [
+      "35",
+      "358",
+      "368",
+      "26",
+      "314",
+      "370",
+      "310"
+    ]
+  },
+  {
+    "id": "S08",
+    "label": "S08 \u2014 Mobility, Spatial & Urban Networks III",
+    "talkIds": [
+      "160",
+      "265",
+      "576",
+      "450",
+      "17",
+      "10"
+    ]
+  },
+  {
+    "id": "S09",
+    "label": "S09 \u2014 Mobility, Spatial & Urban Networks IV",
+    "talkIds": [
+      "447",
+      "581",
+      "527",
+      "535",
+      "532",
+      "406"
+    ]
+  },
+  {
+    "id": "S12",
+    "label": "S12 \u2014 Epidemics, Contagion & Spreading III",
+    "talkIds": [
+      "182",
+      "280",
+      "297",
+      "590",
+      "104"
+    ]
+  },
+  {
+    "id": "S13",
+    "label": "S13 \u2014 Science of Science & Innovation I",
+    "talkIds": [
+      "390",
+      "489",
+      "266",
+      "37",
+      "387",
+      "19"
+    ]
+  },
+  {
+    "id": "S17",
+    "label": "S17 \u2014 Machine Learning & AI II",
+    "talkIds": [
+      "291",
+      "316",
+      "136",
+      "80",
+      "386",
+      "519"
+    ]
+  },
+  {
+    "id": "S18",
+    "label": "S18 \u2014 Machine Learning & AI III",
+    "talkIds": [
+      "167",
+      "433",
+      "366",
+      "542",
+      "620",
+      "619"
+    ]
+  },
+  {
+    "id": "S23",
+    "label": "S23 \u2014 Algorithms, Inference & Reconstruction II",
+    "talkIds": [
+      "74",
+      "336",
+      "85",
+      "42",
+      "132",
+      "169"
+    ]
+  },
+  {
+    "id": "S27",
+    "label": "S27 \u2014 Temporal, Dynamical & Control III",
+    "talkIds": [
+      "88",
+      "64",
+      "438",
+      "193",
+      "321",
+      "220"
+    ]
+  },
+  {
+    "id": "S28",
+    "label": "S28 \u2014 Temporal, Dynamical & Control IV",
+    "talkIds": [
+      "28",
+      "332",
+      "423",
+      "413",
+      "642",
+      "627"
+    ]
+  },
+  {
+    "id": "S31",
+    "label": "S31 \u2014 Biological, Ecological & Health Networks I",
+    "talkIds": [
+      "511",
+      "451",
+      "290",
+      "367"
+    ]
+  },
+  {
+    "id": "S32",
+    "label": "S32 \u2014 Network Models, Theory & Random Graphs I",
+    "talkIds": [
+      "552",
+      "164",
+      "625",
+      "454",
+      "607",
+      "618"
+    ]
+  },
+  {
+    "id": "S33",
+    "label": "S33 \u2014 Brain, Neural & Neuronal Networks",
+    "talkIds": [
+      "100",
+      "218",
+      "327",
+      "515",
+      "567",
+      "624"
+    ]
+  },
+  {
+    "id": "S36",
+    "label": "S36 \u2014 Health, Disease & Biomedical Networks",
+    "talkIds": [
+      "39",
+      "49",
+      "82",
+      "168",
+      "441"
+    ]
+  },
+  {
+    "id": "S37",
+    "label": "S37 \u2014 Collaboration, Labor & Organizational Networks",
+    "talkIds": [
+      "38",
+      "62",
+      "114",
+      "470",
+      "561",
+      "629"
+    ]
+  },
+  {
+    "id": "S39",
+    "label": "S39 \u2014 Ecological Networks",
+    "talkIds": [
+      "31",
+      "448",
+      "15",
+      "44",
+      "214"
+    ]
+  },
+  {
+    "id": "Overflow",
+    "label": "Overflow / Still to Place",
+    "talkIds": [
+      "115",
+      "192",
+      "373"
+    ]
+  }
+]

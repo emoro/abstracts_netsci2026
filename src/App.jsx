@@ -2,134 +2,224 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import "./App.css";
 
-const METHODS = {
-  embedding: {
-    key: "session_embedding",
-    linksKey: "embeddingLinks",
-    label: "Embedding-based",
-  },
-  keyword: {
-    key: "session_keyword",
-    linksKey: "keywordLinks",
-    label: "Keyword Matching",
-  },
-};
-
 function App() {
   const [rawData, setRawData] = useState(null);
-  const [colorMaps, setColorMaps] = useState({});
   const [hoveredNode, setHoveredNode] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [highlightSession, setHighlightSession] = useState(null);
-  const [method, setMethod] = useState("embedding");
-  const [thresholds, setThresholds] = useState({});
+  const [view, setView] = useState("landing");
+  const [sessions, setSessions] = useState(null);
+  const [expandedTalk, setExpandedTalk] = useState(null);
   const fgRef = useRef();
 
-  const sessionField = METHODS[method].key;
+  const STORAGE_KEY = "netsci2026_final_sessions";
 
+  useEffect(() => {
+    document.body.style.overflow = view === "landing" ? "auto" : "hidden";
+  }, [view]);
+
+  // ── Load data ───────────────────────────────────────────────────────────────
   useEffect(() => {
     fetch(import.meta.env.BASE_URL + "graph_data.json")
       .then((r) => r.json())
       .then((data) => {
         setRawData(data);
-        setColorMaps({
-          embedding: data.embeddingColors,
-          keyword: data.keywordColors,
-        });
-        setThresholds({
-          embedding: data.embeddingThreshold,
-          keyword: data.keywordThreshold,
-        });
+        // Build sessions from data
+        const sessionMap = {};
+        for (const label of data.sessionOrder) {
+          sessionMap[label] = {
+            id: label,
+            label,
+            color: data.colors[label],
+            coherence: data.sessionCoherence[label] || 0,
+            talkIds: [],
+          };
+        }
+        for (const node of data.nodes) {
+          if (sessionMap[node.session]) {
+            sessionMap[node.session].talkIds.push(node.id);
+          }
+        }
+        const defaultSessions = data.sessionOrder.map((l) => sessionMap[l]);
+
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          try {
+            setSessions(JSON.parse(saved));
+          } catch {
+            setSessions(defaultSessions);
+          }
+        } else {
+          setSessions(defaultSessions);
+        }
       });
   }, []);
 
+  // Save to localStorage
+  useEffect(() => {
+    if (sessions) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    }
+  }, [sessions]);
+
+  // Talk lookup
+  const talkMap = useMemo(() => {
+    if (!rawData) return {};
+    const m = {};
+    for (const n of rawData.nodes) m[n.id] = n;
+    return m;
+  }, [rawData]);
+
+
+  // ── Session cards ─────────────────────────────────────────────────────────
+  const sessionCards = useMemo(() => {
+    if (!sessions || !rawData) return [];
+    return sessions.map((s) => ({
+      ...s,
+      talks: s.talkIds.map((id) => talkMap[id]).filter(Boolean),
+    }));
+  }, [sessions, rawData, talkMap]);
+
+  // ── Download Word ─────────────────────────────────────────────────────────
+  const downloadWord = useCallback(async () => {
+    if (!sessionCards || !sessionCards.length) return;
+    const {
+      Document, Packer, Paragraph, TextRun,
+      HeadingLevel, AlignmentType, BorderStyle,
+    } = await import("docx");
+    const { saveAs } = await import("file-saver");
+
+    const children = [];
+    children.push(
+      new Paragraph({
+        text: "NetSci 2026 — Contributed Sessions",
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 200 },
+      })
+    );
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `${sessionCards.reduce((s, c) => s + c.talks.length, 0)} talks · ${sessionCards.length} sessions`,
+            italics: true,
+            color: "888888",
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 400 },
+      })
+    );
+
+    for (const card of sessionCards) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: card.label, bold: true, size: 28 }),
+            new TextRun({
+              text: `  (${card.talks.length} talks · coherence: ${card.coherence.toFixed(2)})`,
+              color: "888888",
+              size: 20,
+            }),
+          ],
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 300, after: 100 },
+          border: {
+            bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+          },
+        })
+      );
+      for (const talk of card.talks) {
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: talk.title, bold: true, size: 22 })],
+            spacing: { before: 150, after: 40 },
+          })
+        );
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: talk.authors, italics: true, color: "555555", size: 20 }),
+            ],
+            spacing: { after: 40 },
+          })
+        );
+        if (talk.abstract) {
+          children.push(
+            new Paragraph({
+              children: [new TextRun({ text: talk.abstract, size: 19, color: "333333" })],
+              spacing: { after: 100 },
+            })
+          );
+        }
+      }
+    }
+
+    const doc = new Document({ sections: [{ children }] });
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, "netsci2026_sessions.docx");
+  }, [sessionCards]);
+
+  // ── Network view logic ────────────────────────────────────────────────────
   const { graphData, neighborMap } = useMemo(() => {
     if (!rawData) return { graphData: null, neighborMap: {} };
-
-    const srcLinks = rawData[METHODS[method].linksKey] || [];
-    const links = srcLinks.map((l) => ({ ...l }));
+    const links = rawData.links.map((l) => ({ ...l }));
     const nodes = rawData.nodes.map((n) => ({ ...n }));
-    const gd = { nodes, links };
-
     const adj = {};
     nodes.forEach((n) => (adj[n.id] = new Set()));
-    srcLinks.forEach((l) => {
+    rawData.links.forEach((l) => {
       adj[l.source]?.add(l.target);
       adj[l.target]?.add(l.source);
     });
+    return { graphData: { nodes, links }, neighborMap: adj };
+  }, [rawData]);
 
-    return { graphData: gd, neighborMap: adj };
-  }, [rawData, method]);
-
-  const sessionColors = colorMaps[method] || {};
-
-  const getSession = useCallback(
-    (node) => node[sessionField],
-    [sessionField]
-  );
+  const sessionColors = rawData?.colors || {};
 
   const activeNode = hoveredNode || selectedNode;
 
   const nodeColor = useCallback(
     (node) => {
-      const sess = getSession(node);
-      if (highlightSession && sess !== highlightSession) {
+      const sess = node.session;
+      if (highlightSession && sess !== highlightSession)
         return "rgba(180,180,180,0.2)";
-      }
       if (activeNode) {
-        if (
-          node.id === activeNode.id ||
-          neighborMap[activeNode.id]?.has(node.id)
-        ) {
+        if (node.id === activeNode.id || neighborMap[activeNode.id]?.has(node.id))
           return sessionColors[sess] || "#999";
-        }
         return "rgba(180,180,180,0.2)";
       }
       return sessionColors[sess] || "#999";
     },
-    [activeNode, highlightSession, sessionColors, neighborMap, getSession]
+    [activeNode, highlightSession, sessionColors, neighborMap]
   );
 
   const linkColor = useCallback(
     (link) => {
-      const sid =
-        typeof link.source === "object" ? link.source.id : link.source;
-      const tid =
-        typeof link.target === "object" ? link.target.id : link.target;
-
+      const sid = typeof link.source === "object" ? link.source.id : link.source;
+      const tid = typeof link.target === "object" ? link.target.id : link.target;
       if (highlightSession) {
-        const sNode =
-          typeof link.source === "object" ? link.source : null;
-        const tNode =
-          typeof link.target === "object" ? link.target : null;
-        if (
-          sNode?.[sessionField] !== highlightSession &&
-          tNode?.[sessionField] !== highlightSession
-        ) {
+        const sNode = typeof link.source === "object" ? link.source : null;
+        const tNode = typeof link.target === "object" ? link.target : null;
+        if (sNode?.session !== highlightSession && tNode?.session !== highlightSession)
           return "rgba(0,0,0,0.02)";
-        }
       }
       if (activeNode) {
-        if (sid === activeNode.id || tid === activeNode.id) {
+        if (sid === activeNode.id || tid === activeNode.id)
           return "rgba(50,50,50,0.5)";
-        }
         return "rgba(0,0,0,0.02)";
       }
       return "rgba(0,0,0,0.12)";
     },
-    [activeNode, highlightSession, sessionField]
+    [activeNode, highlightSession]
   );
 
   const linkWidth = useCallback(
     (link) => {
       if (activeNode) {
-        const sid =
-          typeof link.source === "object" ? link.source.id : link.source;
-        const tid =
-          typeof link.target === "object" ? link.target.id : link.target;
-        if (sid === activeNode.id || tid === activeNode.id) {
-          return 1.5;
-        }
+        const sid = typeof link.source === "object" ? link.source.id : link.source;
+        const tid = typeof link.target === "object" ? link.target.id : link.target;
+        if (sid === activeNode.id || tid === activeNode.id) return 1.5;
       }
       return 0.5;
     },
@@ -157,7 +247,6 @@ function App() {
     (node, ctx, globalScale) => {
       const r = 6;
       const color = nodeColor(node);
-
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
       ctx.fillStyle = color;
@@ -173,43 +262,28 @@ function App() {
         const maxWidth = 300 / globalScale;
         const padding = 8 / globalScale;
 
-        // Title
         ctx.font = `bold ${fontSize}px Sans-Serif`;
         const titleLines = wrapText(node.title, maxWidth, ctx);
 
-        // Authors
         ctx.font = `${fontSize * 0.82}px Sans-Serif`;
         const authorsText =
-          node.authors.length > 100
-            ? node.authors.slice(0, 97) + "..."
-            : node.authors;
+          node.authors.length > 100 ? node.authors.slice(0, 97) + "..." : node.authors;
         const authorLines = wrapText(authorsText, maxWidth, ctx);
 
-        // Session badge
-        const session = getSession(node);
-        const sessionText = session || "Unknown";
+        const session = node.session || "Unknown";
         ctx.font = `bold ${fontSize * 0.75}px Sans-Serif`;
-        const sessionWidth = ctx.measureText(sessionText).width;
+        const sessionWidth = ctx.measureText(session).width;
 
-        // Abstract (first ~150 chars)
         ctx.font = `${fontSize * 0.78}px Sans-Serif`;
         const abstractText = node.abstract
           ? node.abstract.length > 200
-            ? node.abstract.slice(0, 200).rsplit
-              ? node.abstract.slice(0, 200) + "..."
-              : node.abstract.slice(0, 200) + "..."
+            ? node.abstract.slice(0, 200) + "..."
             : node.abstract
           : "";
-        const abstractLines = abstractText
-          ? wrapText(abstractText, maxWidth, ctx)
-          : [];
-        // Limit abstract to 4 lines max
+        const abstractLines = abstractText ? wrapText(abstractText, maxWidth, ctx) : [];
         const displayAbstractLines = abstractLines.slice(0, 4);
-        if (abstractLines.length > 4) {
-          displayAbstractLines[3] = displayAbstractLines[3] + "...";
-        }
+        if (abstractLines.length > 4) displayAbstractLines[3] += "...";
 
-        // Compute total height
         const gapAfterTitle = lineHeight * 0.2;
         const gapAfterAuthors = lineHeight * 0.4;
         const badgeHeight = fontSize * 1.8;
@@ -225,62 +299,41 @@ function App() {
           gapAfterBadge +
           lineHeight * 0.8;
 
-        // Compute box width
         ctx.font = `bold ${fontSize}px Sans-Serif`;
         let boxWidth = 0;
-        for (const line of titleLines) {
+        for (const line of titleLines)
           boxWidth = Math.max(boxWidth, ctx.measureText(line).width);
-        }
         ctx.font = `${fontSize * 0.82}px Sans-Serif`;
-        for (const line of authorLines) {
+        for (const line of authorLines)
           boxWidth = Math.max(boxWidth, ctx.measureText(line).width);
-        }
         ctx.font = `${fontSize * 0.78}px Sans-Serif`;
-        for (const line of displayAbstractLines) {
+        for (const line of displayAbstractLines)
           boxWidth = Math.max(boxWidth, ctx.measureText(line).width);
-        }
         boxWidth = Math.max(boxWidth, sessionWidth + padding * 2);
         boxWidth += padding * 2;
 
         const boxX = node.x - boxWidth / 2;
         const boxY = node.y - r - 6 / globalScale - tooltipHeight;
 
-        // Draw tooltip background
+        // Background
         ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
         ctx.beginPath();
         const br = 4 / globalScale;
         ctx.moveTo(boxX + br, boxY);
         ctx.lineTo(boxX + boxWidth - br, boxY);
-        ctx.quadraticCurveTo(
-          boxX + boxWidth, boxY, boxX + boxWidth, boxY + br
-        );
+        ctx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + br);
         ctx.lineTo(boxX + boxWidth, boxY + tooltipHeight - br);
-        ctx.quadraticCurveTo(
-          boxX + boxWidth, boxY + tooltipHeight,
-          boxX + boxWidth - br, boxY + tooltipHeight
-        );
+        ctx.quadraticCurveTo(boxX + boxWidth, boxY + tooltipHeight, boxX + boxWidth - br, boxY + tooltipHeight);
         ctx.lineTo(boxX + br, boxY + tooltipHeight);
-        ctx.quadraticCurveTo(
-          boxX, boxY + tooltipHeight, boxX, boxY + tooltipHeight - br
-        );
+        ctx.quadraticCurveTo(boxX, boxY + tooltipHeight, boxX, boxY + tooltipHeight - br);
         ctx.lineTo(boxX, boxY + br);
         ctx.quadraticCurveTo(boxX, boxY, boxX + br, boxY);
         ctx.fill();
-
-        // Border
         ctx.strokeStyle = "rgba(0,0,0,0.12)";
         ctx.lineWidth = 1 / globalScale;
         ctx.stroke();
 
-        // Draw shadow line at bottom
-        ctx.strokeStyle = "rgba(0,0,0,0.06)";
-        ctx.lineWidth = 2 / globalScale;
-        ctx.beginPath();
-        ctx.moveTo(boxX + 2 / globalScale, boxY + tooltipHeight + 1 / globalScale);
-        ctx.lineTo(boxX + boxWidth - 2 / globalScale, boxY + tooltipHeight + 1 / globalScale);
-        ctx.stroke();
-
-        // Title text
+        // Title
         ctx.font = `bold ${fontSize}px Sans-Serif`;
         ctx.fillStyle = "#333";
         ctx.textAlign = "left";
@@ -289,17 +342,15 @@ function App() {
           ctx.fillText(line, boxX + padding, y);
           y += lineHeight;
         }
-
         y += gapAfterTitle;
 
-        // Authors text
+        // Authors
         ctx.font = `${fontSize * 0.82}px Sans-Serif`;
         ctx.fillStyle = "#777";
         for (const line of authorLines) {
           ctx.fillText(line, boxX + padding, y);
           y += lineHeight;
         }
-
         y += gapAfterAuthors;
 
         // Session badge
@@ -308,7 +359,6 @@ function App() {
         const badgeW = sessionWidth + badgePadH * 2;
         const badgeH = fontSize * 1.1 + badgePadV * 2;
         const badgeColor = sessionColors[session] || "#999";
-
         ctx.fillStyle = badgeColor;
         ctx.beginPath();
         const bbr = 3 / globalScale;
@@ -324,14 +374,13 @@ function App() {
         ctx.lineTo(bx, by + bbr);
         ctx.quadraticCurveTo(bx, by, bx + bbr, by);
         ctx.fill();
-
         ctx.font = `bold ${fontSize * 0.75}px Sans-Serif`;
         ctx.fillStyle = "#fff";
-        ctx.fillText(sessionText, bx + badgePadH, by + badgePadV + fontSize * 0.85);
+        ctx.fillText(session, bx + badgePadH, by + badgePadV + fontSize * 0.85);
 
         y = by + badgeH + gapAfterBadge + lineHeight * 0.8;
 
-        // Abstract text
+        // Abstract
         if (displayAbstractLines.length > 0) {
           ctx.font = `${fontSize * 0.78}px Sans-Serif`;
           ctx.fillStyle = "#666";
@@ -342,7 +391,7 @@ function App() {
         }
       }
     },
-    [nodeColor, activeNode, wrapText, getSession, sessionColors]
+    [nodeColor, activeNode, wrapText, sessionColors]
   );
 
   const nodePointerAreaPaint = useCallback((node, color, ctx) => {
@@ -352,17 +401,82 @@ function App() {
     ctx.fill();
   }, []);
 
-  const sessionList = Object.entries(sessionColors).sort((a, b) =>
-    a[0].localeCompare(b[0])
-  );
+  const sessionList = rawData
+    ? rawData.sessionOrder.map((label) => [label, rawData.colors[label]])
+    : [];
 
-  const edgeCount = graphData?.links?.length || 0;
-  const nodeCount = graphData?.nodes?.length || 0;
-  const threshold = thresholds[method] || 0;
-
-  if (!graphData) {
+  if (!rawData) {
     return <div className="loading">Loading graph data...</div>;
   }
+
+  // ── Landing page ──────────────────────────────────────────────────────────
+  if (view === "landing") {
+    return (
+      <div className="landing">
+        <div className="landing-header">
+          <img
+            src={import.meta.env.BASE_URL + "netsci2026_logo.png"}
+            alt="NetSci 2026"
+            className="landing-logo"
+          />
+          <div className="landing-title">
+            <h1>NetSci 2026 Contributed Sessions</h1>
+            <p>
+              {sessionCards.reduce((sum, c) => sum + c.talks.length, 0)} talks
+              in {sessionCards.length} sessions
+            </p>
+          </div>
+          <button className="download-btn" onClick={downloadWord} title="Download as Word">
+            Download .docx
+          </button>
+          <button className="explore-btn" onClick={() => setView("network")}>
+            Explore Network
+          </button>
+        </div>
+
+        <div className="cards-grid">
+          {sessionCards.map((card) => (
+            <div
+              key={card.id}
+              className="session-card"
+              style={{ borderLeftColor: card.color }}
+            >
+              <div className="card-header">
+                <h2>{card.label}</h2>
+              </div>
+              <div className="card-meta">
+                {card.talks.length} talks · Coherence = {(card.coherence * 100).toFixed(0)}%
+              </div>
+              <div className="card-talks">
+                {card.talks.map((talk) => (
+                  <div
+                    key={talk.id}
+                    className={`card-talk${expandedTalk === talk.id ? " card-talk-expanded" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedTalk(expandedTalk === talk.id ? null : talk.id);
+                    }}
+                  >
+                    <span className="card-talk-title">{talk.title}</span>
+                    <span className="card-talk-authors">{talk.authors}</span>
+                    {expandedTalk === talk.id && (
+                      <div className="card-talk-detail">
+                        <p className="card-talk-abstract">{talk.abstract}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Network view ──────────────────────────────────────────────────────────
+  const edgeCount = graphData?.links?.length || 0;
+  const nodeCount = graphData?.nodes?.length || 0;
 
   return (
     <div className="app">
@@ -395,56 +509,31 @@ function App() {
             <h1>Abstract Similarity Network</h1>
             <p>
               {nodeCount} talks &middot; {edgeCount.toLocaleString()} edges
-              &middot; similarity &ge; {threshold.toFixed(2)}
+              &middot; similarity &ge; {rawData.threshold.toFixed(2)}
             </p>
           </div>
         </div>
+        <button className="back-btn" onClick={() => setView("landing")}>
+          Back to Sessions
+        </button>
       </div>
 
       <div className="sidebar">
-        <div className="method-toggle">
-          {Object.entries(METHODS).map(([key, { label }]) => (
-            <button
-              key={key}
-              className={`toggle-btn ${method === key ? "active" : ""}`}
-              onClick={() => {
-                setMethod(key);
-                setHighlightSession(null);
-                setSelectedNode(null);
-                setHoveredNode(null);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         <div className="legend-panel">
           <h3>Sessions ({sessionList.length})</h3>
           <div className="legend-list">
             {sessionList.map(([label, color]) => (
               <div
                 key={label}
-                className={`legend-item ${
-                  highlightSession === label ? "active" : ""
-                }`}
+                className={`legend-item ${highlightSession === label ? "active" : ""}`}
                 onClick={() =>
-                  setHighlightSession(
-                    highlightSession === label ? null : label
-                  )
+                  setHighlightSession(highlightSession === label ? null : label)
                 }
               >
-                <span
-                  className="legend-dot"
-                  style={{ backgroundColor: color }}
-                />
+                <span className="legend-dot" style={{ backgroundColor: color }} />
                 <span className="legend-label">{label}</span>
                 <span className="legend-count">
-                  {
-                    graphData.nodes.filter(
-                      (n) => n[sessionField] === label
-                    ).length
-                  }
+                  {graphData.nodes.filter((n) => n.session === label).length}
                 </span>
               </div>
             ))}
