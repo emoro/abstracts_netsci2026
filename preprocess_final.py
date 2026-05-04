@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Build graph_data.json from:
-  - NetSci2026_final_sessions.md  (session assignments — source of truth)
+  - NetSci2026_sessions - FINAL Netsci 2026 Sessions.csv  (session assignments — source of truth)
   - cosine_similarity_matrix.csv  (embedding similarities)
   - talk_metadata_with_clusters.json (title, authors, abstract)
 """
 
 import csv
+import io
 import json
 import re
 import sys
@@ -16,31 +17,46 @@ from collections import deque
 THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 0.55
 BASE = "/Users/emoro/MyDocuments/Netsci 2026/final_program"
 
-# ── 1. Parse final sessions markdown ─────────────────────────────────────────
-print("Parsing NetSci2026_final_sessions.md...")
-md_text = open(f"{BASE}/NetSci2026_final_sessions.md").read()
+# Edge score: blend embedding cosine similarity with same-session indicator (0/1).
+# Cross-session pairs need sim >= THRESHOLD (same as before), since session term is 0.
+EDGE_EMBEDDING_WEIGHT = 0.5
+EDGE_SESSION_WEIGHT = 0.5
+
+
+def session_color_group(label: str) -> str:
+    """e.g. 'Network Models 1' / 'Network Models 2' → 'Network Models' (one color)."""
+    s = label.strip()
+    s = re.sub(r"^S\d+\s*[—-]\s*", "", s, flags=re.IGNORECASE).strip()
+    # Trailing parallel slot 1–100 only (avoid stripping years like … 2024)
+    s = re.sub(r"\s+(?:[1-9]\d?|100)\s*$", "", s).strip()
+    return s or label.strip()
+
+
+# ── 1. Parse final sessions CSV ─────────────────────────────────────────────
+session_csv = f"{BASE}/NetSci2026_sessions - FINAL Netsci 2026 Sessions.csv"
+print(f"Parsing {session_csv.split('/')[-1]}...")
+raw_lines = open(session_csv, encoding="utf-8").read().splitlines()
+header_idx = next(
+    i for i, line in enumerate(raw_lines) if line.strip().startswith("Submission #")
+)
+reader = csv.DictReader(io.StringIO("\n".join(raw_lines[header_idx:])))
 
 session_map = {}  # paper_id -> session_label
 session_order = []  # ordered list of unique session labels
 
-for m in re.finditer(
-    r'^## S\d+\s*[—-]\s*(.+?)$',
-    md_text,
-    re.MULTILINE,
-):
-    session_label = m.group(1).strip()
+for row in reader:
+    dropped = (row.get("Dropped") or "").strip().upper()
+    if dropped in ("YES", "Y", "1", "TRUE"):
+        continue
+    paper_id = (row.get("Submission #") or "").strip()
+    if not paper_id.isdigit():
+        continue
+    session_label = (row.get("Assigned Session") or "").strip()
+    if not session_label:
+        continue
+    session_map[paper_id] = session_label
     if session_label not in session_order:
         session_order.append(session_label)
-
-    # Find all submission IDs in this session's block
-    start = m.end()
-    next_header = re.search(r'\n## S\d+', md_text[start:])
-    end = start + next_header.start() if next_header else len(md_text)
-    block = md_text[start:end]
-
-    for sub_m in re.finditer(r'Submission #:\s*(\d+)', block):
-        paper_id = sub_m.group(1)
-        session_map[paper_id] = session_label
 
 print(f"  Found {len(session_map)} talks in {len(session_order)} sessions")
 
@@ -67,9 +83,12 @@ with open(f"{BASE}/cosine_similarity_matrix.csv") as f:
         sim_matrix[rid] = {csv_ids[j]: float(row[j + 1]) for j in range(len(csv_ids))}
 
 # ── 4. Build edges ───────────────────────────────────────────────────────────
-print(f"Building edges (threshold >= {THRESHOLD})...")
+min_combined = EDGE_EMBEDDING_WEIGHT * THRESHOLD
+print(
+    f"Building edges (score = {EDGE_EMBEDDING_WEIGHT:.0%} embedding + "
+    f"{EDGE_SESSION_WEIGHT:.0%} same-session; keep if score >= {min_combined:.4f})..."
+)
 edges = []
-id_set = set(talk_ids)
 for i, a in enumerate(talk_ids):
     for j in range(i + 1, len(talk_ids)):
         b = talk_ids[j]
@@ -79,8 +98,17 @@ for i, a in enumerate(talk_ids):
             sim = sim_matrix[b][a]
         else:
             continue
-        if sim >= THRESHOLD:
-            edges.append({"source": a, "target": b, "value": round(sim, 4)})
+        same_session = 1.0 if session_map.get(a) == session_map.get(b) else 0.0
+        combined = EDGE_EMBEDDING_WEIGHT * sim + EDGE_SESSION_WEIGHT * same_session
+        if combined >= min_combined:
+            edges.append(
+                {
+                    "source": a,
+                    "target": b,
+                    "value": round(combined, 4),
+                    "embeddingSim": round(sim, 4),
+                }
+            )
 
 print(f"  {len(edges)} edges (avg degree {2*len(edges)/len(talk_ids):.1f})")
 
@@ -115,18 +143,30 @@ if len(components) > 1:
     main_comp = components[0]
     bridge_count = 0
     for comp in components[1:]:
-        # Find best bridge edge
-        best_sim = -1
+        # Find best bridge edge (by blended score)
+        best_sim = -1.0
         best_pair = None
+        best_emb = 0.0
         for a in comp:
             for b in main_comp:
                 s = sim_matrix.get(a, {}).get(b, sim_matrix.get(b, {}).get(a, 0))
-                if s > best_sim:
-                    best_sim = s
+                same_session = (
+                    1.0 if session_map.get(a) == session_map.get(b) else 0.0
+                )
+                combined = EDGE_EMBEDDING_WEIGHT * s + EDGE_SESSION_WEIGHT * same_session
+                if combined > best_sim:
+                    best_sim = combined
                     best_pair = (a, b)
+                    best_emb = s
         if best_pair:
-            edges.append({"source": best_pair[0], "target": best_pair[1],
-                          "value": round(best_sim, 4)})
+            edges.append(
+                {
+                    "source": best_pair[0],
+                    "target": best_pair[1],
+                    "value": round(best_sim, 4),
+                    "embeddingSim": round(best_emb, 4),
+                }
+            )
             main_comp.update(comp)
             bridge_count += 1
     print(f"  Added {bridge_count} bridge edges")
@@ -162,9 +202,16 @@ PALETTE = [
     "#1E8449", "#B7950B", "#6E2C00", "#4A148C", "#004D40",
 ]
 
-colors = {}
-for i, session in enumerate(session_order):
-    colors[session] = PALETTE[i % len(PALETTE)]
+group_order = []
+seen_groups = set()
+for s in session_order:
+    g = session_color_group(s)
+    if g not in seen_groups:
+        seen_groups.add(g)
+        group_order.append(g)
+
+group_color = {g: PALETTE[i % len(PALETTE)] for i, g in enumerate(group_order)}
+colors = {s: group_color[session_color_group(s)] for s in session_order}
 
 # ── 8. Build nodes ───────────────────────────────────────────────────────────
 nodes = []
@@ -184,6 +231,11 @@ out = {
     "links": edges,
     "colors": colors,
     "threshold": THRESHOLD,
+    "edgeBlend": {
+        "embeddingWeight": EDGE_EMBEDDING_WEIGHT,
+        "sessionWeight": EDGE_SESSION_WEIGHT,
+        "minCombinedScore": round(min_combined, 4),
+    },
     "sessionCoherence": coherence,
     "sessionOrder": session_order,
 }
@@ -193,6 +245,9 @@ with open(outpath, "w") as f:
     json.dump(out, f)
 
 print(f"\nNodes: {len(nodes)}")
-print(f"Edges: {len(edges)} (threshold >= {THRESHOLD})")
+print(
+    f"Edges: {len(edges)} (blended score >= {min_combined:.4f}; "
+    f"embedding-only bar {THRESHOLD})"
+)
 print(f"Sessions: {len(session_order)}")
 print(f"Written to {outpath}")

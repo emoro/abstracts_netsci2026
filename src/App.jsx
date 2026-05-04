@@ -1,6 +1,277 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
+import Papa from "papaparse";
 import "./App.css";
+
+/** Default: bundled copy of `NetSci2026_sessions - FINAL Netsci 2026 Sessions.csv` in `public/`. */
+const FINAL_SESSIONS_CSV_URL =
+  import.meta.env.VITE_FINAL_SESSIONS_CSV_URL?.trim() ||
+  import.meta.env.BASE_URL + "netsci2026_final_sessions.csv";
+
+const SESSION_COLOR_PALETTE = [
+  "#C8352E",
+  "#2E86C1",
+  "#28B463",
+  "#F39C12",
+  "#8E44AD",
+  "#E74C3C",
+  "#1ABC9C",
+  "#D4AC0D",
+  "#5B2C6F",
+  "#117A65",
+];
+
+function findColumn(headers, patterns) {
+  const lowered = headers.map((h) => h.trim().toLowerCase());
+  for (const pattern of patterns) {
+    const idx = lowered.findIndex((h) => pattern.test(h));
+    if (idx >= 0) return headers[idx];
+  }
+  return null;
+}
+
+function extractTalkId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/\d+/);
+  return match ? match[0] : "";
+}
+
+function stripSessionPrefix(label) {
+  return label.replace(/^s\d+\s*[—-]\s*/i, "").trim();
+}
+
+/** Same palette for "Topic 1" / "Topic 2" / "Topic 3" (trailing slot 1–100 only). */
+function sessionColorGroup(label) {
+  const s = stripSessionPrefix(String(label || "").trim());
+  return s.replace(/\s+(?:[1-9]\d?|100)\s*$/, "").trim() || s;
+}
+
+function sliceFinalSessionsCsvText(text) {
+  const withoutBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const match = withoutBom.match(/^Submission #,/m);
+  if (!match) return null;
+  return withoutBom.slice(match.index);
+}
+
+function parseFinalSessionsCsvRows(csvText) {
+  const sliced = sliceFinalSessionsCsvText(csvText);
+  if (!sliced) return [];
+  const parsed = Papa.parse(sliced, {
+    header: true,
+    skipEmptyLines: "greedy",
+    transformHeader: (h) => String(h).trim(),
+  });
+  if (parsed.errors?.length) {
+    console.warn("CSV parse warnings:", parsed.errors.slice(0, 8));
+  }
+  const data = Array.isArray(parsed.data) ? parsed.data : [];
+  return data.filter(
+    (row) =>
+      row &&
+      typeof row === "object" &&
+      Object.keys(row).some((k) => String(row[k] ?? "").trim())
+  );
+}
+
+function isDroppedCell(value) {
+  const v = String(value || "").trim().toLowerCase();
+  return v === "yes" || v === "y" || v === "true" || v === "1";
+}
+
+function colorForSessionLabel(label, fallbackIndex = 0) {
+  let hash = 0;
+  for (let i = 0; i < label.length; i++) {
+    hash = (hash << 5) - hash + label.charCodeAt(i);
+    hash |= 0;
+  }
+  const hue = Math.abs(hash + fallbackIndex * 31) % 360;
+  return `hsl(${hue}, 55%, 46%)`;
+}
+
+function parseSessionAssignments(rows, baseData) {
+  if (!rows.length) return null;
+
+  const headers = Object.keys(rows[0]);
+  const droppedColumn = findColumn(headers, [/^dropped$/i]);
+  const idColumn = findColumn(headers, [
+    /^submission\s*#?$/i,
+    /submission.*id/i,
+    /paper.*id/i,
+    /talk.*id/i,
+    /^id$/i,
+  ]);
+  const sessionColumn = findColumn(headers, [
+    /^assigned session$/i,
+    /^session$/i,
+    /session.*label/i,
+    /final.*session/i,
+    /assigned.*session/i,
+    /session.*title/i,
+  ]);
+  const sessionCodeColumn = findColumn(headers, [
+    /session.*(code|id|slot|number)/i,
+    /^s\d+$/i,
+  ]);
+
+  if (!idColumn || !sessionColumn) {
+    throw new Error(
+      "Missing required columns. Expected a talk/submission ID column and a session column."
+    );
+  }
+
+  const validTalkIds = new Set(baseData.nodes.map((n) => String(n.id)));
+  const talkToSession = {};
+  const sessionOrder = [];
+  const seen = new Set();
+
+  for (const row of rows) {
+    if (droppedColumn && isDroppedCell(row[droppedColumn])) continue;
+
+    const talkId = extractTalkId(row[idColumn]);
+    if (!talkId || !validTalkIds.has(talkId)) continue;
+
+    const sessionRaw = String(row[sessionColumn] || "").trim();
+    if (!sessionRaw) continue;
+
+    const sessionCode = sessionCodeColumn
+      ? String(row[sessionCodeColumn] || "").trim()
+      : "";
+    const normalizedCode = sessionCode.match(/^s\d+$/i)
+      ? sessionCode.toUpperCase()
+      : "";
+    const sessionLabel = normalizedCode
+      ? `${normalizedCode} — ${sessionRaw}`
+      : sessionRaw;
+
+    talkToSession[talkId] = sessionLabel;
+    if (!seen.has(sessionLabel)) {
+      seen.add(sessionLabel);
+      sessionOrder.push(sessionLabel);
+    }
+  }
+
+  return { talkToSession, sessionOrder };
+}
+
+function applySheetAssignmentsToGraph(baseData, parsed) {
+  const colorByGroup = {};
+  const coherenceByCanonical = {};
+  for (const label of baseData.sessionOrder) {
+    const g = sessionColorGroup(label);
+    if (baseData.colors[label] != null && colorByGroup[g] == null) {
+      colorByGroup[g] = baseData.colors[label];
+    }
+    coherenceByCanonical[stripSessionPrefix(label)] =
+      baseData.sessionCoherence[label] ?? 0;
+  }
+
+  const nodes = baseData.nodes.map((node) => {
+    const sheetSession = parsed.talkToSession[String(node.id)];
+    return sheetSession ? { ...node, session: sheetSession } : { ...node };
+  });
+
+  const dynamicOrder = [];
+  const added = new Set();
+  for (const label of parsed.sessionOrder) {
+    if (!added.has(label)) {
+      dynamicOrder.push(label);
+      added.add(label);
+    }
+  }
+  for (const node of nodes) {
+    if (!added.has(node.session)) {
+      dynamicOrder.push(node.session);
+      added.add(node.session);
+    }
+  }
+
+  const groupOrder = [];
+  const seenGroups = new Set();
+  for (const label of dynamicOrder) {
+    const g = sessionColorGroup(label);
+    if (!seenGroups.has(g)) {
+      seenGroups.add(g);
+      groupOrder.push(g);
+    }
+  }
+  const groupPaletteFallback = {};
+  groupOrder.forEach((g, idx) => {
+    groupPaletteFallback[g] =
+      colorByGroup[g] ||
+      SESSION_COLOR_PALETTE[idx % SESSION_COLOR_PALETTE.length] ||
+      colorForSessionLabel(g, idx);
+  });
+
+  const colors = {};
+  const coherence = {};
+  dynamicOrder.forEach((label) => {
+    const g = sessionColorGroup(label);
+    const canonical = stripSessionPrefix(label);
+    colors[label] =
+      baseData.colors[label] ||
+      colorByGroup[g] ||
+      groupPaletteFallback[g] ||
+      colorForSessionLabel(g, 0);
+    coherence[label] =
+      baseData.sessionCoherence[label] ?? coherenceByCanonical[canonical] ?? 0;
+  });
+
+  return {
+    ...baseData,
+    nodes,
+    colors,
+    sessionCoherence: coherence,
+    sessionOrder: dynamicOrder,
+  };
+}
+
+function filterGraphToAssignedTalks(graphData, talkToSession) {
+  const ids = new Set(Object.keys(talkToSession));
+  const nodes = graphData.nodes.filter((n) => ids.has(String(n.id)));
+  const idSet = new Set(nodes.map((n) => String(n.id)));
+  const links = graphData.links.filter((l) => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    return idSet.has(String(s)) && idSet.has(String(t));
+  });
+  const sessionOrder = graphData.sessionOrder.filter((label) =>
+    nodes.some((n) => n.session === label)
+  );
+  const colors = {};
+  const sessionCoherence = {};
+  for (const label of sessionOrder) {
+    colors[label] = graphData.colors[label];
+    sessionCoherence[label] = graphData.sessionCoherence[label] ?? 0;
+  }
+  return {
+    ...graphData,
+    nodes,
+    links,
+    sessionOrder,
+    colors,
+    sessionCoherence,
+  };
+}
+
+function buildSessionCards(data) {
+  const sessionMap = {};
+  for (const label of data.sessionOrder) {
+    sessionMap[label] = {
+      id: label,
+      label,
+      color: data.colors[label],
+      coherence: data.sessionCoherence[label] || 0,
+      talkIds: [],
+    };
+  }
+  for (const node of data.nodes) {
+    if (sessionMap[node.session]) {
+      sessionMap[node.session].talkIds.push(node.id);
+    }
+  }
+  return data.sessionOrder.map((label) => sessionMap[label]);
+}
 
 function App() {
   const [rawData, setRawData] = useState(null);
@@ -20,39 +291,60 @@ function App() {
 
   // ── Load data ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    fetch(import.meta.env.BASE_URL + "graph_data.json")
-      .then((r) => r.json())
-      .then((data) => {
-        setRawData(data);
-        // Build sessions from data
-        const sessionMap = {};
-        for (const label of data.sessionOrder) {
-          sessionMap[label] = {
-            id: label,
-            label,
-            color: data.colors[label],
-            coherence: data.sessionCoherence[label] || 0,
-            talkIds: [],
-          };
-        }
-        for (const node of data.nodes) {
-          if (sessionMap[node.session]) {
-            sessionMap[node.session].talkIds.push(node.id);
-          }
-        }
-        const defaultSessions = data.sessionOrder.map((l) => sessionMap[l]);
+    let cancelled = false;
 
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          try {
-            setSessions(JSON.parse(saved));
-          } catch {
-            setSessions(defaultSessions);
-          }
-        } else {
-          setSessions(defaultSessions);
+    async function loadData() {
+      const baseUrl = import.meta.env.BASE_URL;
+      const response = await fetch(baseUrl + "graph_data.json");
+      const baseData = await response.json();
+      let hydratedData = baseData;
+      let loadedFromFinalCsv = false;
+
+      try {
+        const csvResponse = await fetch(FINAL_SESSIONS_CSV_URL);
+        if (!csvResponse.ok) {
+          throw new Error(`HTTP ${csvResponse.status}`);
         }
-      });
+        const csvText = await csvResponse.text();
+        const rows = parseFinalSessionsCsvRows(csvText);
+        const parsed = parseSessionAssignments(rows, baseData);
+        if (parsed && Object.keys(parsed.talkToSession).length > 0) {
+          const reassigned = applySheetAssignmentsToGraph(baseData, parsed);
+          hydratedData = filterGraphToAssignedTalks(reassigned, parsed.talkToSession);
+          loadedFromFinalCsv = true;
+        } else {
+          console.warn("Final sessions CSV had no rows matching graph talks.");
+        }
+      } catch (err) {
+        console.warn("Could not load final sessions CSV:", err);
+      }
+
+      if (cancelled) return;
+
+      setRawData(hydratedData);
+      const defaultSessions = buildSessionCards(hydratedData);
+
+      if (loadedFromFinalCsv) {
+        setSessions(defaultSessions);
+        return;
+      }
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          setSessions(JSON.parse(saved));
+          return;
+        } catch {
+          // fall through to default data
+        }
+      }
+      setSessions(defaultSessions);
+    }
+
+    loadData();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Save to localStorage
@@ -175,7 +467,7 @@ function App() {
     return { graphData: { nodes, links }, neighborMap: adj };
   }, [rawData]);
 
-  const sessionColors = rawData?.colors || {};
+  const sessionColors = useMemo(() => rawData?.colors || {}, [rawData]);
 
   const activeNode = hoveredNode || selectedNode;
 
@@ -509,7 +801,17 @@ function App() {
             <h1>Abstract Similarity Network</h1>
             <p>
               {nodeCount} talks &middot; {edgeCount.toLocaleString()} edges
-              &middot; similarity &ge; {rawData.threshold.toFixed(2)}
+              &middot;{" "}
+              {rawData.edgeBlend ? (
+                <>
+                  edge score = {rawData.edgeBlend.embeddingWeight}·sim +{" "}
+                  {rawData.edgeBlend.sessionWeight}·(same session) &ge;{" "}
+                  {rawData.edgeBlend.minCombinedScore.toFixed(2)} (cross-session: sim
+                  &ge; {rawData.threshold.toFixed(2)})
+                </>
+              ) : (
+                <>similarity &ge; {rawData.threshold.toFixed(2)}</>
+              )}
             </p>
           </div>
         </div>
