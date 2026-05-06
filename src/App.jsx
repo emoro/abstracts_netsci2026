@@ -37,8 +37,19 @@ function extractTalkId(value) {
   return match ? match[0] : "";
 }
 
+function normalizeSessionCode(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^s\d+$/i.test(raw)) return raw.toUpperCase();
+  if (/^ps\s*\d+(?:\.\d+)?$/i.test(raw)) return raw.toUpperCase().replace(/\s+/g, " ");
+  return raw;
+}
+
 function stripSessionPrefix(label) {
-  return label.replace(/^s\d+\s*[—-]\s*/i, "").trim();
+  return label
+    .replace(/^s\d+\s*[—-]\s*/i, "")
+    .replace(/^ps\s*\d+(?:\.\d+)?\s*[—-]\s*/i, "")
+    .trim();
 }
 
 /** Same palette for "Topic 1" / "Topic 2" / "Topic 3" (trailing slot 1–100 only). */
@@ -110,6 +121,7 @@ function parseSessionAssignments(rows, baseData) {
     /session.*title/i,
   ]);
   const sessionCodeColumn = findColumn(headers, [
+    /^session\s*#$/i,
     /session.*(code|id|slot|number)/i,
     /^s\d+$/i,
   ]);
@@ -137,9 +149,7 @@ function parseSessionAssignments(rows, baseData) {
     const sessionCode = sessionCodeColumn
       ? String(row[sessionCodeColumn] || "").trim()
       : "";
-    const normalizedCode = sessionCode.match(/^s\d+$/i)
-      ? sessionCode.toUpperCase()
-      : "";
+    const normalizedCode = normalizeSessionCode(sessionCode);
     const sessionLabel = normalizedCode
       ? `${normalizedCode} — ${sessionRaw}`
       : sessionRaw;
@@ -573,8 +583,8 @@ function App() {
             : node.abstract
           : "";
         const abstractLines = abstractText ? wrapText(abstractText, maxWidth, ctx) : [];
-        const displayAbstractLines = abstractLines.slice(0, 4);
-        if (abstractLines.length > 4) displayAbstractLines[3] += "...";
+        const displayAbstractLines = abstractLines.slice(0, 6);
+        if (abstractLines.length > 6) displayAbstractLines[5] += "...";
 
         const gapAfterTitle = lineHeight * 0.2;
         const gapAfterAuthors = lineHeight * 0.4;
@@ -767,7 +777,6 @@ function App() {
   }
 
   // ── Network view ──────────────────────────────────────────────────────────
-  const edgeCount = graphData?.links?.length || 0;
   const nodeCount = graphData?.nodes?.length || 0;
 
   return (
@@ -798,20 +807,9 @@ function App() {
         <div className="title-bar">
           <img src={import.meta.env.BASE_URL + "netsci2026_logo.png"} alt="NetSci 2026" />
           <div className="title-text">
-            <h1>Abstract Similarity Network</h1>
+            <h1>Contributed talks Network</h1>
             <p>
-              {nodeCount} talks &middot; {edgeCount.toLocaleString()} edges
-              &middot;{" "}
-              {rawData.edgeBlend ? (
-                <>
-                  edge score = {rawData.edgeBlend.embeddingWeight}·sim +{" "}
-                  {rawData.edgeBlend.sessionWeight}·(same session) &ge;{" "}
-                  {rawData.edgeBlend.minCombinedScore.toFixed(2)} (cross-session: sim
-                  &ge; {rawData.threshold.toFixed(2)})
-                </>
-              ) : (
-                <>similarity &ge; {rawData.threshold.toFixed(2)}</>
-              )}
+              {nodeCount} talks &middot; {sessionList.length} sessions
             </p>
           </div>
         </div>

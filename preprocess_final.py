@@ -27,6 +27,7 @@ def session_color_group(label: str) -> str:
     """e.g. 'Network Models 1' / 'Network Models 2' → 'Network Models' (one color)."""
     s = label.strip()
     s = re.sub(r"^S\d+\s*[—-]\s*", "", s, flags=re.IGNORECASE).strip()
+    s = re.sub(r"^PS\s*\d+(?:\.\d+)?\s*[—-]\s*", "", s, flags=re.IGNORECASE).strip()
     # Trailing parallel slot 1–100 only (avoid stripping years like … 2024)
     s = re.sub(r"\s+(?:[1-9]\d?|100)\s*$", "", s).strip()
     return s or label.strip()
@@ -51,9 +52,13 @@ for row in reader:
     paper_id = (row.get("Submission #") or "").strip()
     if not paper_id.isdigit():
         continue
-    session_label = (row.get("Assigned Session") or "").strip()
-    if not session_label:
+    session_name = (row.get("Assigned Session") or "").strip()
+    session_number = (row.get("Session #") or row.get("Session\xa0#") or "").strip()
+    if not session_name:
         continue
+    session_label = (
+        f"{session_number} — {session_name}" if session_number else session_name
+    )
     session_map[paper_id] = session_label
     if session_label not in session_order:
         session_order.append(session_label)
