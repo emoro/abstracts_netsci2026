@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Build graph_data.json from:
-  - NetSci2026_sessions - FINAL Netsci 2026 Sessions.csv  (session assignments — source of truth)
-  - cosine_similarity_matrix.csv  (embedding similarities)
-  - talk_metadata_with_clusters.json (title, authors, abstract)
+Build public/sessions_graph_data.json from:
+  - data/catalog/… FINAL Netsci 2026 Sessions.csv (session assignments — source of truth)
+  - data/intermediate/cosine_similarity_matrix.csv (embedding cosine similarities)
+  - data/intermediate/talk_metadata.json (title, authors, abstract; optional if CSV has text)
 """
 
 import csv
@@ -11,16 +11,45 @@ import io
 import json
 import re
 import sys
+from pathlib import Path
+
 import numpy as np
 from collections import deque
 
+import build_program as bp
+
 THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 0.55
-BASE = "/Users/emoro/MyDocuments/Netsci 2026/final_program"
+APP_ROOT = Path(__file__).resolve().parent.parent
+INTERMEDIATE_DIR = bp.INTERMEDIATE_DIR
+PUBLIC_DIR = APP_ROOT / "public"
 
 # Edge score: blend embedding cosine similarity with same-session indicator (0/1).
 # Cross-session pairs need sim >= THRESHOLD (same as before), since session term is 0.
 EDGE_EMBEDDING_WEIGHT = 0.5
 EDGE_SESSION_WEIGHT = 0.5
+
+
+def normalize_header(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "")).strip().lower()
+
+
+def header_lookup(fieldnames):
+    return {normalize_header(name): name for name in fieldnames if name}
+
+
+def row_value(row, lookup, aliases):
+    for alias in aliases:
+        key = lookup.get(normalize_header(alias))
+        if not key:
+            continue
+        value = (row.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def is_dropped(value: str) -> bool:
+    return value.strip().upper() in ("YES", "Y", "1", "TRUE")
 
 
 def session_color_group(label: str) -> str:
@@ -34,26 +63,27 @@ def session_color_group(label: str) -> str:
 
 
 # ── 1. Parse final sessions CSV ─────────────────────────────────────────────
-session_csv = f"{BASE}/NetSci2026_sessions - FINAL Netsci 2026 Sessions.csv"
-print(f"Parsing {session_csv.split('/')[-1]}...")
-raw_lines = open(session_csv, encoding="utf-8").read().splitlines()
+session_csv = bp.SESSION_CSV
+print(f"Parsing {session_csv.name}...")
+raw_lines = session_csv.read_text(encoding="utf-8").splitlines()
 header_idx = next(
     i for i, line in enumerate(raw_lines) if line.strip().startswith("Submission #")
 )
 reader = csv.DictReader(io.StringIO("\n".join(raw_lines[header_idx:])))
+lookup = header_lookup(reader.fieldnames or [])
 
 session_map = {}  # paper_id -> session_label
 session_order = []  # ordered list of unique session labels
+talk_details = {}  # paper_id -> title/authors/abstract from CSV
 
 for row in reader:
-    dropped = (row.get("Dropped") or "").strip().upper()
-    if dropped in ("YES", "Y", "1", "TRUE"):
+    if is_dropped(row_value(row, lookup, ["Dropped"])):
         continue
-    paper_id = (row.get("Submission #") or "").strip()
+    paper_id = row_value(row, lookup, ["Submission #", "Submission ID"])
     if not paper_id.isdigit():
         continue
-    session_name = (row.get("Assigned Session") or "").strip()
-    session_number = (row.get("Session #") or row.get("Session\xa0#") or "").strip()
+    session_name = row_value(row, lookup, ["Assigned Session"])
+    session_number = row_value(row, lookup, ["Session #", "Session\xa0#"])
     if not session_name:
         continue
     session_label = (
@@ -62,23 +92,53 @@ for row in reader:
     session_map[paper_id] = session_label
     if session_label not in session_order:
         session_order.append(session_label)
+    talk_details[paper_id] = {
+        "title": row_value(row, lookup, ["Title", "Paper Title"]),
+        "authors": row_value(row, lookup, ["Authors", "Author Name"]),
+        "abstract": row_value(row, lookup, ["Abstract"]),
+        "day": row_value(row, lookup, ["Day"]),
+        "time": row_value(row, lookup, ["Time"]),
+        "primarySpeaker": row_value(
+            row,
+            lookup,
+            ["Primary speaker", "Primary contact", "Primary Contact Author Name"],
+        ),
+    }
 
 print(f"  Found {len(session_map)} talks in {len(session_order)} sessions")
 
-# ── 2. Load talk metadata ────────────────────────────────────────────────────
-with open(f"{BASE}/talk_metadata_with_clusters.json") as f:
+# ── 2. Load talk metadata (from embedding step; fallback for older runs) ─────
+_meta_paths = [
+    INTERMEDIATE_DIR / "talk_metadata.json",
+    INTERMEDIATE_DIR / "talk_metadata_with_clusters.json",
+]
+meta_path = next((p for p in _meta_paths if p.is_file()), None)
+if not meta_path:
+    raise SystemExit(
+        "Missing talk metadata. Run scripts/build_sessions_embeddings.py first "
+        f"(expected one of: {[p.name for p in _meta_paths]})"
+    )
+print(f"  Loading talk metadata from {meta_path.name}...")
+with meta_path.open(encoding="utf-8") as f:
     all_talks = json.load(f)
 
 # Index by ID
 talk_by_id = {t["id"]: t for t in all_talks}
 
-# Only keep talks that appear in the final sessions
-talk_ids = [pid for pid in session_map if pid in talk_by_id]
-print(f"  Matched {len(talk_ids)} talks to metadata")
+# Keep scheduled talks with metadata and/or CSV text fields
+talk_ids = []
+for pid in session_map:
+    csv_talk = talk_details.get(pid, {})
+    if pid in talk_by_id or csv_talk.get("title"):
+        talk_ids.append(pid)
+print(
+    f"  Matched {len(talk_ids)} talks "
+    f"({sum(1 for pid in talk_ids if pid in talk_by_id)} in metadata)"
+)
 
 # ── 3. Load embedding similarity matrix ──────────────────────────────────────
 print("Loading cosine similarity matrix...")
-with open(f"{BASE}/cosine_similarity_matrix.csv") as f:
+with (INTERMEDIATE_DIR / "cosine_similarity_matrix.csv").open(encoding="utf-8") as f:
     reader = csv.reader(f)
     header = next(reader)
     csv_ids = header[1:]
@@ -221,14 +281,22 @@ colors = {s: group_color[session_color_group(s)] for s in session_order}
 # ── 8. Build nodes ───────────────────────────────────────────────────────────
 nodes = []
 for pid in talk_ids:
-    t = talk_by_id[pid]
-    nodes.append({
+    t = talk_by_id.get(pid, {})
+    csv_talk = talk_details.get(pid, {})
+    node = {
         "id": pid,
-        "title": t.get("title", ""),
-        "authors": t.get("authors", ""),
-        "abstract": t.get("abstract", ""),
+        "title": csv_talk.get("title") or t.get("title", ""),
+        "authors": csv_talk.get("authors") or t.get("authors", ""),
+        "abstract": csv_talk.get("abstract") or t.get("abstract", ""),
         "session": session_map[pid],
-    })
+    }
+    if csv_talk.get("day"):
+        node["day"] = csv_talk["day"]
+    if csv_talk.get("time"):
+        node["time"] = csv_talk["time"]
+    if csv_talk.get("primarySpeaker"):
+        node["primarySpeaker"] = csv_talk["primarySpeaker"]
+    nodes.append(node)
 
 # ── 9. Write output ──────────────────────────────────────────────────────────
 out = {
@@ -245,9 +313,9 @@ out = {
     "sessionOrder": session_order,
 }
 
-outpath = f"{BASE}/network-app/public/graph_data.json"
-with open(outpath, "w") as f:
-    json.dump(out, f)
+outpath = PUBLIC_DIR / "sessions_graph_data.json"
+with outpath.open("w", encoding="utf-8") as f:
+    json.dump(out, f, ensure_ascii=False)
 
 print(f"\nNodes: {len(nodes)}")
 print(
