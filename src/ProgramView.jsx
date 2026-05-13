@@ -9,7 +9,6 @@ import {
   formatProgramDayShortLabel,
   indexLightning,
   indexProgram,
-  matchesProgramSearch,
   parseProgramDayKey,
   parseTimeMinutes,
   splitSessionLabel,
@@ -223,10 +222,6 @@ function ProgramMyProgramPanel({ program, visibleItems }) {
 
   return (
     <>
-      <p className="program-myprogram-note">
-        My program is saved in this browser on this device, so it stays after you close the tab. It
-        is not synced to other browsers or devices. Clearing site data for this site will remove it.
-      </p>
       {byDay.map(({ day, items: dayItems }) => (
         <article
           key={day || "unknown"}
@@ -449,11 +444,10 @@ export default function ProgramView({
   const isLightning = programTab === "lightning";
   const isMyProgram = programTab === "myprogram";
   const sidebarDayList = useMemo(() => {
-    if (isMyProgram) return calendarDays.length ? calendarDays : [];
     if (isPosters) return posterDays.length ? posterDays : calendarDays;
     if (isLightning) return lightningDays.length ? lightningDays : calendarDays;
     return calendarDays;
-  }, [isMyProgram, isPosters, isLightning, posterDays, lightningDays, calendarDays]);
+  }, [isPosters, isLightning, posterDays, lightningDays, calendarDays]);
 
   /** Selected days restricted to poster days (posters tab). */
   const daysForPosterContent = useMemo(() => {
@@ -621,35 +615,8 @@ export default function ProgramView({
 
   const myProgramVisibleItems = useMemo(() => {
     if (!isMyProgram) return [];
-    const sorted = [...cartItems].sort(sortCartExport);
-    if (!selectedDays.length) return [];
-    const daySet = selectedSet;
-    return sorted.filter(
-      (it) =>
-        daySet.has(it.day) &&
-        matchesProgramSearch(
-          [
-            it.title,
-            it.speaker,
-            it.sessionLabel,
-            it.day,
-            it.time,
-            it.kind,
-            it.kind === "poster"
-              ? "Poster"
-              : it.kind === "lightning"
-                ? "Lightning"
-                : "Parallel",
-          ],
-          search
-        )
-    );
-  }, [isMyProgram, cartItems, selectedDays, selectedSet, search]);
-
-  const myProgramDayCount = useMemo(
-    () => new Set(myProgramVisibleItems.map((it) => it.day).filter(Boolean)).size,
-    [myProgramVisibleItems]
-  );
+    return [...cartItems].sort(sortCartExport);
+  }, [isMyProgram, cartItems]);
 
   const downloadMyProgramPdfClick = useCallback(async () => {
     const sorted = [...cartItems].sort(sortCartExport);
@@ -736,37 +703,46 @@ export default function ProgramView({
       </div>
 
       <div className="program-shell-inner program-parallel-layout">
-        <aside className="program-sidebar" aria-labelledby="program-filter-legend-title">
-          <p id="program-filter-legend-title" className="program-sidebar-title">
-            Filter
-          </p>
-          <fieldset className="program-filter-fieldset">
-            <legend className="program-filter-legend">Days</legend>
-            <ul className="program-day-checkboxes">
-              {sidebarDayList.map((day) => (
-                <li key={day}>
-                  <label className="program-day-checkbox-label">
-                    <input
-                      type="checkbox"
-                      className="program-day-checkbox"
-                      checked={selectedSet.has(day)}
-                      onChange={() => onToggleDay(day)}
-                    />
-                    <span>{formatProgramDayShortLabel(day, program)}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </fieldset>
-          <label className="program-search program-search-sidebar">
-            <span className="program-search-sidebar-label">Search</span>
-            <input
-              type="search"
-              placeholder='Search… "exact phrase" or word1 word2 (any match)'
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-            />
-          </label>
+        <aside
+          className="program-sidebar"
+          {...(isMyProgram
+            ? { "aria-label": "My program" }
+            : { "aria-labelledby": "program-filter-legend-title" })}
+        >
+          {!isMyProgram ? (
+            <>
+              <p id="program-filter-legend-title" className="program-sidebar-title">
+                Filter
+              </p>
+              <fieldset className="program-filter-fieldset">
+                <legend className="program-filter-legend">Days</legend>
+                <ul className="program-day-checkboxes">
+                  {sidebarDayList.map((day) => (
+                    <li key={day}>
+                      <label className="program-day-checkbox-label">
+                        <input
+                          type="checkbox"
+                          className="program-day-checkbox"
+                          checked={selectedSet.has(day)}
+                          onChange={() => onToggleDay(day)}
+                        />
+                        <span>{formatProgramDayShortLabel(day, program)}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </fieldset>
+              <label className="program-search program-search-sidebar">
+                <span className="program-search-sidebar-label">Search</span>
+                <input
+                  type="search"
+                  placeholder='Search… "exact phrase" or word1 word2 (any match)'
+                  value={search}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
           {!isMyProgram ? (
             <div className="program-sidebar-view">
               <p className="program-sidebar-view-label">View</p>
@@ -801,12 +777,10 @@ export default function ProgramView({
               cartItems.length === 0 ? (
                 <>Nothing saved</>
               ) : (
-                <>
-                  {myProgramDayCount} {myProgramDayCount === 1 ? "day" : "days"}
-                  {" · "}
+                <strong className="program-sidebar-myprogram-count">
                   {myProgramVisibleItems.length}{" "}
                   {myProgramVisibleItems.length === 1 ? "item" : "items"}
-                </>
+                </strong>
               )
             ) : isPosters ? (
               <>
@@ -833,10 +807,16 @@ export default function ProgramView({
             )}
           </p>
           {isMyProgram ? (
+            <p className="program-myprogram-note program-sidebar-myprogram-note">
+              My program is saved in this browser on this device, so it stays after you close the
+              tab. It is not synced to other browsers or devices. Clearing site data for this site
+              will remove it.
+            </p>
+          ) : null}
+          {isMyProgram ? (
             <div className="program-sidebar-myprogram-actions">
               <p className="program-sidebar-myprogram-hint">
-                Download PDF includes every item in My program (full list), not only the current day
-                filter.
+                Download PDF includes every saved item in My program.
               </p>
               <button
                 type="button"
@@ -864,14 +844,6 @@ export default function ProgramView({
               <p className="program-empty">
                 Nothing saved yet. Tap the heart on a list row or use &quot;Add to My program&quot; in
                 a talk detail.
-              </p>
-            ) : selectedDays.length === 0 ? (
-              <p className="program-empty">Select at least one day to see your program.</p>
-            ) : myProgramVisibleItems.length === 0 ? (
-              <p className="program-empty">
-                {search.trim()
-                  ? "No saved items match your search for the selected days."
-                  : "No saved items on the selected days."}
               </p>
             ) : (
               <ProgramMyProgramPanel program={program} visibleItems={myProgramVisibleItems} />

@@ -816,6 +816,10 @@ body {
   color: #888;
 }
 
+.program-sidebar-myprogram-note {
+  margin: 10px 0 0;
+}
+
 .program-myprogram-row-shell-overlap {
   background: #fffbeb;
   border-color: #fbbf24;
@@ -1168,6 +1172,12 @@ body {
   font-size: 0.72rem;
   line-height: 1.4;
   color: #777;
+}
+
+.program-sidebar-myprogram-count {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #333;
 }
 
 .program-sidebar-myprogram-actions {
@@ -1755,17 +1765,35 @@ body {
   }
 
   .program-parallel-layout {
-    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
   }
 
   .program-sidebar {
-    width: 124px;
-    min-width: 124px;
-    padding: 8px 8px;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    position: static;
+    align-self: stretch;
+    padding: 12px 14px;
+    box-sizing: border-box;
+  }
+
+  .program-parallel-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .program-day-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 4px 10px;
+    margin-bottom: 10px;
   }
 
   .program-day-checkbox-label {
-    font-size: 0.76rem;
+    font-size: 0.8rem;
   }
 
   .program-search-sidebar input {
@@ -1782,6 +1810,10 @@ body {
     font-size: 0.68rem;
   }
 
+  .program-sidebar-myprogram-count {
+    font-size: 1.2rem;
+  }
+
   .program-timeline,
   .program-session-detail {
     padding-left: 14px;
@@ -1790,5 +1822,51 @@ body {
 
   .program-session-card-head {
     flex-direction: column;
+  }
+
+  .program-session-card h3,
+  .program-event-card h3 {
+    font-size: 1rem;
+  }
+
+  .program-talk-title {
+    font-size: 0.92rem;
+    line-height: 1.35;
+  }
+
+  .program-talk-row-shell:has(.program-myprogram-remove) {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .program-talk-row-shell:has(.program-myprogram-remove) .program-talk-row {
+    width: 100%;
+  }
+
+  .program-talk-row-shell:has(.program-myprogram-remove) .program-myprogram-remove {
+    flex: 1 1 100%;
+    align-self: stretch;
+    margin-top: 2px;
+    padding: 10px 12px;
+    text-align: center;
+    border-radius: 6px;
+    border: 1px solid rgba(200, 53, 46, 0.35);
+    background: rgba(200, 53, 46, 0.06);
+    color: #c8352e;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .program-sidebar-myprogram-note,
+  .program-sidebar-myprogram-hint {
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+
+  .program-app-tab {
+    padding: 10px 12px;
+    font-size: 0.82rem;
   }
 }
